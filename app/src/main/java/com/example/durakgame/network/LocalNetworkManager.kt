@@ -11,6 +11,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+
 class LocalNetworkManager : GameNetworkManager {
     private val udpDiscovery = UdpDiscovery()
     private var serverSocket: ServerSocket? = null
@@ -21,14 +22,23 @@ class LocalNetworkManager : GameNetworkManager {
     private var gameCode = ""
     private val clientWriters = ConcurrentHashMap<String, PrintWriter>()
     private val _messages = MutableSharedFlow<GameMessage>(replay = 0)
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    
+    private var managerJob = SupervisorJob()
+    private var scope = CoroutineScope(Dispatchers.IO + managerJob)
+
     fun getUdpDiscovery(): UdpDiscovery = udpDiscovery
 
     override fun startHost(config: GameConfig, playerName: String): String {
-        try { serverSocket?.close() } catch (_: Exception) {}
+        disconnect()
         isHost = true
         gameCode = generateGameCode()
-        serverSocket = ServerSocket(55555)
+        
+        try {
+            serverSocket = ServerSocket(55555)
+        } catch (e: Exception) {
+            android.util.Log.e("Network", "Failed to start server: ${e.message}")
+            return ""
+        }
 
         // UDP
         udpDiscovery.startAnnouncing(gameCode, 55555)
@@ -39,11 +49,15 @@ class LocalNetworkManager : GameNetworkManager {
                     val socket = serverSocket?.accept() ?: break
                     handleClient(socket)
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                if (isActive) android.util.Log.e("Network", "Server accept error: ${e.message}")
+            }
         }
         return gameCode
     }
+
     override fun connectToGame(hostAddress: String, playerName: String) {
+        disconnect()
         isHost = false
         val parts = hostAddress.split(":")
         val host = parts[0]
@@ -51,16 +65,22 @@ class LocalNetworkManager : GameNetworkManager {
 
         scope.launch {
             try {
+                delay(200)
                 clientSocket = Socket(host, port)
                 writer = PrintWriter(clientSocket!!.getOutputStream(), true)
                 val reader = BufferedReader(InputStreamReader(clientSocket!!.getInputStream()))
+                
                 sendRaw(GameMessage(type = "JOIN", playerId = myPlayerId, playerName = playerName))
+                
                 while (isActive) {
                     val line = reader.readLine() ?: break
                     _messages.emit(parseMessage(JSONObject(line)))
                 }
             } catch (e: Exception) {
-                if (isActive) _messages.emit(GameMessage(type = "ERROR", error = e.message))
+                if (isActive) {
+                    android.util.Log.e("Network", "Connect error: ${e.message}")
+                    _messages.emit(GameMessage(type = "ERROR", error = e.message))
+                }
             }
         }
     }
@@ -84,9 +104,9 @@ class LocalNetworkManager : GameNetworkManager {
                         else -> _messages.emit(msg)
                     }
                 }
-            } catch (_: Exception) {}
-            finally {
-                // Клиент отключился — отправляем PLAYER_LEFT
+            } catch (e: Exception) {
+                if (isActive) android.util.Log.e("Network", "Handle client error: ${e.message}")
+            } finally {
                 android.util.Log.d("Network", "Клиент отключился")
                 _messages.emit(GameMessage(type = "PLAYER_LEFT"))
             }
@@ -106,7 +126,9 @@ class LocalNetworkManager : GameNetworkManager {
     private fun broadcast(msg: GameMessage) {
         scope.launch {
             val json = toJson(msg)
-            clientWriters.values.forEach { try { it.println(json) } catch (_: Exception) {} }
+            clientWriters.values.forEach { 
+                try { it.println(json) } catch (_: Exception) {} 
+            }
         }
     }
 
@@ -114,14 +136,25 @@ class LocalNetworkManager : GameNetworkManager {
     override fun getGameCode() = gameCode
     override fun getMyPlayerId() = myPlayerId
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     override fun disconnect() {
         udpDiscovery.stop()
-        scope.cancel()
+        
+        managerJob.cancel() 
+        managerJob = SupervisorJob()
+        scope = CoroutineScope(Dispatchers.IO + managerJob)
+
         try {
             serverSocket?.close()
-            serverSocket = null
         } catch (_: Exception) {}
-        try { clientSocket?.close() } catch (_: Exception) {}
+        serverSocket = null
+        
+        try {
+            clientSocket?.close()
+        } catch (_: Exception) {}
+        clientSocket = null
+        
+        writer = null
         clientWriters.clear()
         _messages.resetReplayCache()
     }
@@ -146,15 +179,19 @@ class LocalNetworkManager : GameNetworkManager {
     private fun parseMessage(json: JSONObject): GameMessage {
         return GameMessage(
             type = json.getString("type"),
-            playerId = json.optString("playerId", null),
-            playerName = json.optString("playerName", null),
-            cardId = json.optString("cardId", null),
-            againstCardId = json.optString("againstCardId", null),
-            gameCode = json.optString("gameCode", null),
-            playersJson = json.optString("playersJson", null),
-            trumpSuit = json.optString("trumpSuit", null),
-            trumpCardId = json.optString("trumpCardId", null),
-            error = json.optString("error", null)
+            playerId = json.optStringOrNull("playerId"),
+            playerName = json.optStringOrNull("playerName"),
+            cardId = json.optStringOrNull("cardId"),
+            againstCardId = json.optStringOrNull("againstCardId"),
+            gameCode = json.optStringOrNull("gameCode"),
+            playersJson = json.optStringOrNull("playersJson"),
+            trumpSuit = json.optStringOrNull("trumpSuit"),
+            trumpCardId = json.optStringOrNull("trumpCardId"),
+            error = json.optStringOrNull("error")
         )
+    }
+
+    private fun JSONObject.optStringOrNull(key: String): String? {
+        return if (has(key) && !isNull(key)) optString(key) else null
     }
 }
