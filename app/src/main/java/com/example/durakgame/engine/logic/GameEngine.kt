@@ -2,6 +2,24 @@ package com.example.durakgame.engine.logic
 
 import com.example.durakgame.engine.model.*
 
+sealed class Action {
+    abstract val playerId: String
+    data class Attack(override val playerId: String, val cardId: String) : Action()
+    data class Defend(override val playerId: String, val cardId: String, val againstCardId: String) : Action()
+    data class Transfer(override val playerId: String, val cardId: String) : Action()
+    data class AddCard(override val playerId: String, val cardId: String) : Action()
+    data class DeclareTake(override val playerId: String) : Action()
+    data class TakeCards(override val playerId: String) : Action()
+    data class EndTurn(override val playerId: String) : Action()
+    data class PassAdding(override val playerId: String) : Action()
+}
+
+data class GameResult(
+    val winners: List<Player>,
+    val loser: Player?,
+    val finalState: GameState
+)
+
 class GameEngine(private val config: GameConfig) {
 
     private var gameState: GameState = GameState(
@@ -12,11 +30,12 @@ class GameEngine(private val config: GameConfig) {
 
     fun getState(): GameState = gameState
 
-    fun addPlayer(name: String, isHost: Boolean = false): Player {
+    fun addPlayer(name: String, isHost: Boolean = false, avatarBase64: String? = null): Player {
         val player = Player(
             id = generatePlayerId(),
             name = name,
-            isHost = isHost
+            isHost = isHost,
+            avatarBase64 = avatarBase64
         )
         gameState = gameState.copy(
             players = gameState.players + player
@@ -35,10 +54,8 @@ class GameEngine(private val config: GameConfig) {
         deck.shuffle()
 
         val playersWithCards = gameState.players.map { player ->
-            player.copy(hand = deck.draw(6).toMutableList())
-        }
-
-        playersWithCards.forEach { it.sortHand(deck.trumpSuit) }
+            player.copy(hand = deck.draw(6))
+        }.map { it.sortedHand(deck.trumpSuit) }
 
         val firstAttackerIndex = findFirstAttacker(playersWithCards, deck.trumpSuit)
 
@@ -49,12 +66,13 @@ class GameEngine(private val config: GameConfig) {
             currentDefenderIndex = findNextPlayerWithCards(playersWithCards, firstAttackerIndex),
             phase = GameState.GamePhase.PLAYING,
             roundNumber = 1,
-            tableCards = mutableListOf(),
-            playersConfirmedEnd = mutableSetOf(),
+            tableCards = emptyList(),
+            playersConfirmedEnd = emptySet(),
             playerWhoTookCards = null,
             lastTrumpSuit = deck.trumpSuit
         )
     }
+
     fun setDeck(cards: List<Card>) {
         gameState = gameState.copy(
             deck = Deck.fromCards(cards)
@@ -74,12 +92,17 @@ class GameEngine(private val config: GameConfig) {
         }
     }
 
+    private fun updatePlayer(playerId: String, transform: (Player) -> Player) {
+        gameState = gameState.copy(
+            players = gameState.players.map { if (it.id == playerId) transform(it) else it }
+        )
+    }
+
     private fun handleAttack(action: Action.Attack): Result<GameState> {
         if (gameState.phase != GameState.GamePhase.PLAYING) {
             return Result.failure(IllegalStateException("Нельзя атаковать"))
         }
 
-        // Кто может атаковать: атакующий ИЛИ подкидывающие (если атакующий уже сходил)
         val isAttacker = action.playerId == gameState.currentAttacker.id
         val isAdding = gameState.tableCards.isNotEmpty() && action.playerId != gameState.currentDefender.id
 
@@ -92,7 +115,12 @@ class GameEngine(private val config: GameConfig) {
         val card = player.hand.find { it.id == action.cardId }
             ?: return Result.failure(IllegalStateException("Карта не найдена"))
 
-        // Проверка: первая карта любая, остальные того же достоинства
+        val defender = gameState.currentDefender
+        val unbeatenCount = gameState.tableCards.count { !it.isDefended }
+        if (unbeatenCount + 1 > defender.hand.size) {
+            return Result.failure(IllegalStateException("У защищающегося недостаточно карт"))
+        }
+
         if (gameState.tableCards.isNotEmpty()) {
             val tableRanks = gameState.tableCards.flatMap {
                 listOfNotNull(it.attackingCard.rank, it.defendingCard?.rank)
@@ -102,7 +130,7 @@ class GameEngine(private val config: GameConfig) {
             }
         }
 
-        player.removeCard(card)
+        updatePlayer(player.id) { it.removeCard(card.id) }
         gameState = gameState.copy(
             tableCards = gameState.tableCards + GameState.TableSlot(attackingCard = card)
         )
@@ -121,15 +149,19 @@ class GameEngine(private val config: GameConfig) {
         val card = defender.hand.find { it.id == action.cardId }
             ?: return Result.failure(IllegalStateException("Карта не найдена в руке"))
 
-        val slotIndex = gameState.tableCards.indexOfFirst { !it.isDefended }
-        if (slotIndex == -1) return Result.failure(IllegalStateException("Нет неотбитых карт"))
+        // Ищем слот именно с той картой, которую игрок хочет побить
+        val slotIndex = gameState.tableCards.indexOfFirst { 
+            it.attackingCard.id == action.againstCardId && !it.isDefended 
+        }
+        
+        if (slotIndex == -1) return Result.failure(IllegalStateException("Эта карта уже отбита или не найдена"))
 
         val slot = gameState.tableCards[slotIndex]
         if (!card.beats(slot.attackingCard, gameState.trumpSuit)) {
             return Result.failure(IllegalStateException("Не бьёт"))
         }
 
-        defender.removeCard(card)
+        updatePlayer(defender.id) { it.removeCard(card.id) }
         val newTableCards = gameState.tableCards.toMutableList()
         newTableCards[slotIndex] = GameState.TableSlot(slot.attackingCard, card)
 
@@ -155,6 +187,12 @@ class GameEngine(private val config: GameConfig) {
         val card = player.hand.find { it.id == action.cardId }
             ?: return Result.failure(IllegalStateException("Карта не найдена"))
 
+        val defender = gameState.currentDefender
+        val unbeatenCount = gameState.tableCards.count { !it.isDefended }
+        if (unbeatenCount + 1 > defender.hand.size) {
+            return Result.failure(IllegalStateException("У защищающегося недостаточно карт"))
+        }
+
         val tableRanks = gameState.tableCards.flatMap {
             listOfNotNull(it.attackingCard.rank, it.defendingCard?.rank)
         }.toSet()
@@ -162,11 +200,11 @@ class GameEngine(private val config: GameConfig) {
             return Result.failure(IllegalStateException("Можно подкидывать только карты с достоинством на столе"))
         }
 
-        player.removeCard(card)
+        updatePlayer(player.id) { it.removeCard(card.id) }
         gameState = gameState.copy(
-            tableCards = gameState.tableCards + GameState.TableSlot(attackingCard = card)
+            tableCards = gameState.tableCards + GameState.TableSlot(attackingCard = card),
+            playersConfirmedEnd = emptySet()
         )
-        gameState = gameState.copy(playersConfirmedEnd = mutableSetOf())
         return Result.success(gameState)
     }
 
@@ -178,28 +216,33 @@ class GameEngine(private val config: GameConfig) {
             return Result.failure(IllegalStateException("Только защищающийся может взять"))
         }
 
-        val defender = gameState.currentDefender
+        val defenderId = gameState.currentDefender.id
         val allCards = gameState.tableCards.flatMap { listOfNotNull(it.attackingCard, it.defendingCard) }
-        defender.addCards(allCards)
-        defender.sortHand(gameState.trumpSuit)
-        gameState = gameState.copy(tableCards = listOf())
+        
+        updatePlayer(defenderId) { 
+            it.addCards(allCards).sortedHand(gameState.trumpSuit)
+        }
+        
+        gameState = gameState.copy(tableCards = emptyList())
         drawCardsAfterRound()
 
         return nextRound(defenderTookCards = true)
     }
 
     private fun handleTakeCards(action: Action.TakeCards): Result<GameState> {
-        val defender = gameState.currentDefender
+        val defenderId = gameState.currentDefender.id
         val allCards = gameState.tableCards.flatMap { listOfNotNull(it.attackingCard, it.defendingCard) }
-        defender.addCards(allCards)
-        defender.sortHand(gameState.trumpSuit)
-        gameState = gameState.copy(tableCards = listOf())
+        
+        updatePlayer(defenderId) {
+            it.addCards(allCards).sortedHand(gameState.trumpSuit)
+        }
+        
+        gameState = gameState.copy(tableCards = emptyList())
         drawCardsAfterRound()
         return nextRound()
     }
 
     private fun handleEndTurn(action: Action.EndTurn): Result<GameState> {
-        android.util.Log.d("GameEngine", "handleEndTurn: playerId=${action.playerId}, phase=${gameState.phase}")
         if (gameState.phase != GameState.GamePhase.PLAYING) {
             return Result.failure(IllegalStateException("Нельзя завершить ход"))
         }
@@ -210,7 +253,6 @@ class GameEngine(private val config: GameConfig) {
             return Result.failure(IllegalStateException("Нет карт на столе"))
         }
 
-        // Проверяем, что все карты отбиты
         if (gameState.tableCards.any { !it.isDefended }) {
             return Result.failure(IllegalStateException("Не все карты отбиты"))
         }
@@ -220,7 +262,6 @@ class GameEngine(private val config: GameConfig) {
         )
 
         if (allNonDefendersConfirmed()) {
-            android.util.Log.d("GameEngine", "allNonDefendersConfirmed, вызываю handleRoundEnd")
             return handleRoundEnd()
         }
         return Result.success(gameState)
@@ -249,21 +290,8 @@ class GameEngine(private val config: GameConfig) {
         return Result.success(gameState)
     }
 
-    private fun getRequiredConfirmations(): Int {
-        val defenderId = gameState.currentDefender.id
-        val playerWhoTookId = gameState.playerWhoTookCards
-
-        if (playerWhoTookId != null) {
-            return gameState.getActivePlayers().count {
-                it.id != playerWhoTookId
-            }
-        }
-
-        return gameState.getActivePlayers().count { it.id != defenderId }
-    }
-
     private fun handleRoundEnd(): Result<GameState> {
-        gameState = gameState.copy(tableCards = listOf())
+        gameState = gameState.copy(tableCards = emptyList())
         drawCardsAfterRound()
         return nextRound(defenderTookCards = false)
     }
@@ -278,12 +306,9 @@ class GameEngine(private val config: GameConfig) {
         val nextDefender: Int
 
         if (defenderTookCards) {
-            // Защищающийся взял карты — пропускает ход
-            // Атакующим становится тот, кто после защищающегося
             nextAttacker = gameState.getNextPlayerIndex(gameState.currentDefenderIndex)
             nextDefender = gameState.getNextPlayerIndex(nextAttacker)
         } else {
-            // Защищающийся отбился — становится атакующим
             nextAttacker = gameState.currentDefenderIndex
             nextDefender = gameState.getNextPlayerIndex(nextAttacker)
         }
@@ -305,13 +330,13 @@ class GameEngine(private val config: GameConfig) {
         val drawOrder = getDrawOrder()
         for (playerIndex in drawOrder) {
             val player = gameState.players[playerIndex]
-            if (!player.hasCards) continue
-
+            
             val cardsToDraw = 6 - player.hand.size
-            if (cardsToDraw > 0) {
+            if (cardsToDraw > 0 && !gameState.deck.isEmpty) {
                 val drawnCards = gameState.deck.draw(cardsToDraw)
-                player.addCards(drawnCards)
-                player.sortHand(gameState.trumpSuit)
+                updatePlayer(player.id) {
+                    it.addCards(drawnCards).sortedHand(gameState.trumpSuit)
+                }
             }
         }
     }
@@ -327,23 +352,10 @@ class GameEngine(private val config: GameConfig) {
     }
 
     private fun checkGameOver(): Boolean {
-        val activePlayers = gameState.getActivePlayers()
-        if (activePlayers.size <= 1) return true
-        if (gameState.deck.isEmpty) {
-            return activePlayers.size <= 1
-        }
-        return false
-    }
-
-    fun getGameResult(): GameResult {
-        val playersWithoutCards = gameState.players.filter { !it.hasCards }
-        val playersWithCards = gameState.players.filter { it.hasCards }
-
-        return GameResult(
-            winners = playersWithoutCards,
-            loser = playersWithCards.firstOrNull(),
-            finalState = gameState
-        )
+        if (!gameState.deck.isEmpty) return false
+        
+        val playersWithCards = gameState.players.count { it.hasCards }
+        return playersWithCards <= 1
     }
 
     private fun findFirstAttacker(players: List<Player>, trumpSuit: Suit): Int {
@@ -367,8 +379,10 @@ class GameEngine(private val config: GameConfig) {
 
     private fun findNextPlayerWithCards(players: List<Player>, fromIndex: Int): Int {
         var next = (fromIndex + 1) % players.size
-        while (!players[next].hasCards && next != fromIndex) {
+        var checked = 0
+        while (!players[next].hasCards && checked < players.size) {
             next = (next + 1) % players.size
+            checked++
         }
         return next
     }
@@ -376,61 +390,4 @@ class GameEngine(private val config: GameConfig) {
     private fun generatePlayerId(): String {
         return java.util.UUID.randomUUID().toString()
     }
-
-    private fun getPlayer(playerId: String): Player {
-        return gameState.players.find { it.id == playerId }
-            ?: throw IllegalArgumentException("Игрок с ID $playerId не найден")
-    }
-
-    private fun findCardInHand(playerId: String, cardId: String): Card? {
-        val player = gameState.players.find { it.id == playerId } ?: return null
-        return player.hand.find { it.id == cardId }
-    }
 }
-
-sealed class Action {
-    abstract val playerId: String
-
-    data class Attack(
-        override val playerId: String,
-        val cardId: String
-    ) : Action()
-
-    data class Defend(
-        override val playerId: String,
-        val cardId: String,
-        val againstCardId: String
-    ) : Action()
-
-    data class Transfer(
-        override val playerId: String,
-        val cardId: String
-    ) : Action()
-
-    data class AddCard(
-        override val playerId: String,
-        val cardId: String
-    ) : Action()
-
-    data class DeclareTake(
-        override val playerId: String
-    ) : Action()
-
-    data class TakeCards(
-        override val playerId: String
-    ) : Action()
-
-    data class EndTurn(
-        override val playerId: String
-    ) : Action()
-
-    data class PassAdding(
-        override val playerId: String
-    ) : Action()
-}
-
-data class GameResult(
-    val winners: List<Player>,
-    val loser: Player?,
-    val finalState: GameState
-)

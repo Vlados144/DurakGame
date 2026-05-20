@@ -1,137 +1,203 @@
 package com.example.durakgame.ui.screens.game
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.durakgame.engine.model.Card
+import androidx.compose.ui.unit.sp
 import com.example.durakgame.engine.model.GameState
-import com.example.durakgame.ui.components.CardView
+import com.example.durakgame.engine.model.Suit
+import com.example.durakgame.ui.viewmodels.GameViewModel
 
 @Composable
 fun GameTable(
     gameState: GameState,
     isDragOver: Boolean,
-    onTableClick: () -> Unit,
-    modifier: Modifier = Modifier
+    viewModel: GameViewModel,
+    modifier: Modifier = Modifier,
+    skinId: String = "classic"
 ) {
     val dragAlpha by animateFloatAsState(
         targetValue = if (isDragOver) 0.15f else 0f,
         label = "dragAlpha"
     )
+    
+    val highlightedCardId by viewModel.highlightedCardId.collectAsState()
+
+    // Динамическое смещение стола при появлении второго ряда
+    val rows = gameState.tableCards.chunked(3)
+    val tableOffset by animateDpAsState(
+        targetValue = if (rows.size > 1) (-80).dp else 0.dp,
+        label = "tableVerticalOffset"
+    )
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(200.dp)
-            .padding(8.dp)
+            .height(420.dp)
+            .padding(horizontal = 4.dp)
     ) {
-        // Слева — колода и козырь
-        if (!gameState.deck.isEmpty) {
-            Column(
-                modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Стопка рубашек
-                Box {
-                    Box(modifier = Modifier.offset(x = (-2).dp, y = (-2).dp)) {
-                        CardView(label = "", faceUp = false, small = true)
-                    }
-                    CardView(label = "", faceUp = false, small = true)
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                // Козырь
+        // Колода и козырь слева
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .offset(x = (-80).dp)
+        ) {
+            if (gameState.deck.size > 0) {
                 val trump = gameState.deck.peekTrump()
                 CardView(
-                    label = trump.toString(),
-                    isRed = trump.suit.name == "HEARTS" || trump.suit.name == "DIAMONDS",
-                    small = true
+                    card = trump,
+                    small = true,
+                    skinId = skinId,
+                    modifier = Modifier
+                        .offset(x = 15.dp, y = 10.dp)
+                        .graphicsLayer { rotationZ = 90f }
                 )
-            }
-        }
 
-        // Центр — карты на столе с анимацией появления
-        Row(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(start = 60.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            gameState.tableCards.forEachIndexed { index, slot ->
-                key(slot.attackingCard.id) {
-                    SlotView(slot = slot)
+                if (gameState.deck.size > 1) {
+                    CardView(faceUp = false, small = true, skinId = skinId)
+
+                    Text(
+                        text = "${gameState.deck.size}",
+                        color = Color.White,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .offset(y = (-40).dp, x = 55.dp)
+                    )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(width = 90.dp, height = 120.dp)
+                        .offset(x = 85.dp, y = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = gameState.trumpSuit.symbol,
+                        color = if (gameState.trumpSuit == Suit.HEARTS || gameState.trumpSuit == Suit.DIAMONDS) 
+                                    Color.Red.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.4f),
+                        fontSize = 64.sp,
+                        fontWeight = FontWeight.Black
+                    )
                 }
             }
         }
 
-        // Зона для броска карт с плавной подсветкой
+        // Карты на столе
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 150.dp, start = 20.dp) // нельзя менять
+                .offset(y = tableOffset)
+                .animateContentSize(),
+            verticalArrangement = Arrangement.spacedBy(5.dp), // Уменьшено расстояние между рядами
+            horizontalAlignment = Alignment.Start 
+        ) {
+            rows.forEach { rowCards ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy((-10).dp), // нельзя менять
+                    modifier = Modifier.animateContentSize()
+                ) {
+                    rowCards.forEach { slot ->
+                        key(slot.attackingCard.id) {
+                            SlotView(
+                                slot = slot, 
+                                skinId = skinId,
+                                isHighlighted = highlightedCardId == slot.attackingCard.id,
+                                onPositioned = { rect -> 
+                                    viewModel.updateCardBounds(slot.attackingCard.id, rect)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Зона сброса
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
-                .padding(start = 60.dp)
-                .fillMaxWidth(0.8f)
-                .height(140.dp)
-                .background(
-                    color = Color.White.copy(alpha = dragAlpha),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                .border(
-                    width = if (isDragOver) 2.dp else 0.dp,
-                    color = if (isDragOver) Color(0xFFFFD700).copy(alpha = 0.5f) else Color.Transparent,
-                    shape = RoundedCornerShape(12.dp)
-                )
+                .padding(start = 20.dp, top = 80.dp, bottom = 80.dp, end = 20.dp)
+                .fillMaxSize()
+                .onGloballyPositioned { viewModel.updateTableBounds(it.boundsInRoot()) }
+                .background(Color.White.copy(alpha = dragAlpha), RoundedCornerShape(16.dp))
         )
     }
 }
 
 @Composable
-private fun SlotView(slot: GameState.TableSlot) {
+private fun SlotView(
+    slot: GameState.TableSlot, 
+    skinId: String,
+    isHighlighted: Boolean,
+    onPositioned: (androidx.compose.ui.geometry.Rect) -> Unit
+) {
     Box(
-        modifier = Modifier.padding(horizontal = 4.dp),
+        modifier = Modifier.size(width = 120.dp, height = 140.dp), // Уменьшена высота для предотвращения обрезки ряда
         contentAlignment = Alignment.TopCenter
     ) {
         // Атакующая карта
-        var visible by remember { mutableStateOf(false) }
-        LaunchedEffect(Unit) { visible = true }
+        var showAttacker by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { showAttacker = true }
 
         AnimatedVisibility(
-            visible = visible,
-            enter = fadeIn() + scaleIn(initialScale = 0.8f) + slideInVertically { it / 2 }
+            visible = showAttacker,
+            enter = fadeIn(tween(200)) + 
+                    scaleIn(initialScale = 1.2f, animationSpec = spring(dampingRatio = 0.6f)) +
+                    slideInVertically { -it / 4 }
         ) {
-            CardView(
-                label = slot.attackingCard.toString(),
-                isRed = slot.attackingCard.suit.name == "HEARTS" ||
-                        slot.attackingCard.suit.name == "DIAMONDS",
-                small = true
-            )
+            Box {
+                CardView(
+                    card = slot.attackingCard, 
+                    small = true, 
+                    skinId = skinId,
+                    modifier = Modifier.onGloballyPositioned { 
+                        if (!slot.isDefended) onPositioned(it.boundsInRoot()) 
+                    }
+                )
+                if (isHighlighted && !slot.isDefended) {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(Color.White.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
+                    )
+                }
+            }
         }
-
+        
         // Защищающаяся карта
-        val defending = slot.defendingCard
-        if (defending != null) {
-            var defVisible by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { defVisible = true }
+        slot.defendingCard?.let { defCard ->
+            var showDefender by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { showDefender = true }
 
             AnimatedVisibility(
-                visible = defVisible,
-                enter = fadeIn() + expandVertically() + scaleIn(initialScale = 0.5f),
-                modifier = Modifier.offset(x = 12.dp, y = 16.dp)
+                visible = showDefender,
+                enter = fadeIn() + 
+                        scaleIn(initialScale = 1.5f, animationSpec = spring(dampingRatio = 0.6f)) +
+                        slideInVertically { -it / 2 },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(x = (5).dp, y = (-10).dp)
             ) {
                 CardView(
-                    label = defending.toString(),
-                    isRed = defending.suit.name == "HEARTS" ||
-                            defending.suit.name == "DIAMONDS",
-                    small = true
+                    card = defCard, 
+                    small = true, 
+                    skinId = skinId,
+                    modifier = Modifier.graphicsLayer { rotationZ = 15f }
                 )
             }
         }

@@ -28,7 +28,7 @@ class LocalNetworkManager : GameNetworkManager {
 
     fun getUdpDiscovery(): UdpDiscovery = udpDiscovery
 
-    override fun startHost(config: GameConfig, playerName: String): String {
+    override fun startHost(config: GameConfig, playerName: String, avatarBase64: String?): String {
         disconnect()
         isHost = true
         gameCode = generateGameCode()
@@ -56,7 +56,7 @@ class LocalNetworkManager : GameNetworkManager {
         return gameCode
     }
 
-    override fun connectToGame(hostAddress: String, playerName: String) {
+    override fun connectToGame(hostAddress: String, playerName: String, avatarBase64: String?) {
         disconnect()
         isHost = false
         val parts = hostAddress.split(":")
@@ -70,7 +70,7 @@ class LocalNetworkManager : GameNetworkManager {
                 writer = PrintWriter(clientSocket!!.getOutputStream(), true)
                 val reader = BufferedReader(InputStreamReader(clientSocket!!.getInputStream()))
                 
-                sendRaw(GameMessage(type = "JOIN", playerId = myPlayerId, playerName = playerName))
+                sendRaw(GameMessage(type = "JOIN", playerId = myPlayerId, playerName = playerName, avatarBase64 = avatarBase64))
                 
                 while (isActive) {
                     val line = reader.readLine() ?: break
@@ -166,6 +166,7 @@ class LocalNetworkManager : GameNetworkManager {
             put("type", msg.type)
             msg.playerId?.let { put("playerId", it) }
             msg.playerName?.let { put("playerName", it) }
+            msg.avatarBase64?.let { put("avatarBase64", it) }
             msg.cardId?.let { put("cardId", it) }
             msg.againstCardId?.let { put("againstCardId", it) }
             msg.gameCode?.let { put("gameCode", it) }
@@ -181,6 +182,7 @@ class LocalNetworkManager : GameNetworkManager {
             type = json.getString("type"),
             playerId = json.optStringOrNull("playerId"),
             playerName = json.optStringOrNull("playerName"),
+            avatarBase64 = json.optStringOrNull("avatarBase64"),
             cardId = json.optStringOrNull("cardId"),
             againstCardId = json.optStringOrNull("againstCardId"),
             gameCode = json.optStringOrNull("gameCode"),

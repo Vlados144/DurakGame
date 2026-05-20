@@ -3,8 +3,9 @@ package com.example.durakgame.engine.model
 data class Player(
     val id: String,
     val name: String,
-    val hand: MutableList<Card> = mutableListOf(),
-    val isHost: Boolean = false
+    val hand: List<Card> = emptyList(),
+    val isHost: Boolean = false,
+    val avatarBase64: String? = null
 ) {
     val cardCount: Int
         get() = hand.size
@@ -12,15 +13,17 @@ data class Player(
     val hasCards: Boolean
         get() = hand.isNotEmpty()
 
-    fun removeCard(card: Card): Boolean {
-        return hand.remove(card)
+    fun removeCard(cardId: String): Player {
+        return copy(hand = hand.filter { it.id != cardId })
     }
 
-    fun addCards(cards: List<Card>) {
-        hand.addAll(cards)
+    fun addCards(newCards: List<Card>): Player {
+        return copy(hand = hand + newCards)
     }
 
-    fun sortHand(trumpSuit: Suit) {
-        hand.sortWith(compareBy({ it.suit != trumpSuit }, { it.suit.ordinal }, { it.rank.value }))
+    fun sortedHand(trumpSuit: Suit): Player {
+        return copy(hand = hand.sortedWith(
+            compareBy({ it.suit != trumpSuit }, { it.suit.ordinal }, { it.rank.value })
+        ))
     }
 }

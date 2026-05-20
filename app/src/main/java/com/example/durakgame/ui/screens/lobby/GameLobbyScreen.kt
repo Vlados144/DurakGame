@@ -1,5 +1,8 @@
 package com.example.durakgame.ui.screens.lobby
 
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -10,19 +13,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.durakgame.DurakApplication
 import com.example.durakgame.engine.model.GameConfig
 import com.example.durakgame.engine.model.GameState
-import com.example.durakgame.network.NsdHelper
 import com.example.durakgame.ui.components.GameBackground
 import com.example.durakgame.ui.components.GoldButton
 import com.example.durakgame.ui.components.DarkButton
 import com.example.durakgame.ui.viewmodels.GameViewModel
+import java.io.File
 
 @Composable
 fun GameLobbyScreen(
@@ -30,32 +34,29 @@ fun GameLobbyScreen(
     isHost: Boolean,
     onGameStarted: () -> Unit,
     onBack: () -> Unit,
-    viewModel: GameViewModel  // <-- получаем извне
+    viewModel: GameViewModel
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as DurakApplication
     val players by viewModel.players.collectAsState()
     val displayCode by viewModel.gameCode.collectAsState()
-    val isConnected by viewModel.isConnected.collectAsState()
     val gameState by viewModel.gameState.collectAsState()
 
     var isReady by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        val userName = app.userRepository.getUser().nickname
+        val user = app.userRepository.getUser()
+        val avatarFile = File(context.filesDir, "avatar.jpg").takeIf { it.exists() }
+        
         if (isHost) {
-            viewModel.hostGame(config = GameConfig(), name = userName)
+            viewModel.hostGame(config = GameConfig(), name = user.nickname, avatarFile = avatarFile)
         } else {
-            viewModel.joinGame(gameCode, userName)
+            viewModel.joinGame(gameCode, user.nickname, avatarFile = avatarFile)
         }
     }
 
-    // Автоматический переход в игру при старте
     LaunchedEffect(gameState) {
-        android.util.Log.d("GameLobby", "gameState изменился: ${gameState?.phase}")
-        if (gameState != null &&
-            gameState!!.phase != GameState.GamePhase.WAITING_FOR_PLAYERS) {
-            android.util.Log.d("GameLobby", "Переход в игру")
+        if (gameState != null && gameState!!.phase != GameState.GamePhase.WAITING_FOR_PLAYERS) {
             onGameStarted()
         }
     }
@@ -105,7 +106,8 @@ fun GameLobbyScreen(
                     PlayerSlot(
                         name = "${player.name}${if (player.isHost) " (хост)" else ""}",
                         isHost = player.isHost,
-                        isFilled = true
+                        isFilled = true,
+                        avatarBase64 = player.avatarBase64
                     )
                 }
             }
@@ -122,16 +124,8 @@ fun GameLobbyScreen(
             } else {
                 GoldButton(
                     text = if (isReady) "✅ Готов" else "Нажмите для готовности",
-                    onClick = {
-                        isReady = !isReady
-                        // Отправить готовность хосту
-                    },
+                    onClick = { isReady = !isReady },
                     modifier = Modifier.fillMaxWidth()
-                )
-                Text(
-                    "Ожидание запуска игры хостом...",
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 12.sp
                 )
             }
 
@@ -145,7 +139,16 @@ fun GameLobbyScreen(
 }
 
 @Composable
-private fun PlayerSlot(name: String, isHost: Boolean, isFilled: Boolean) {
+private fun PlayerSlot(name: String, isHost: Boolean, isFilled: Boolean, avatarBase64: String? = null) {
+    val avatarBitmap = remember(avatarBase64) {
+        avatarBase64?.let { base64 ->
+            try {
+                val decodedString = Base64.decode(base64, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(decodedString, 0, decodedString.size)?.asImageBitmap()
+            } catch (e: Exception) { null }
+        }
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         shape = RoundedCornerShape(12.dp),
@@ -153,12 +156,22 @@ private fun PlayerSlot(name: String, isHost: Boolean, isFilled: Boolean) {
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier.size(40.dp).clip(CircleShape).background(
-                    if (isFilled) Color(0xFFFFD700).copy(alpha = 0.6f) else Color.White.copy(alpha = 0.1f)
-                ),
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isFilled) Color(0xFFFFD700).copy(alpha = 0.6f) else Color.White.copy(alpha = 0.1f)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(if (isHost && isFilled) "👑" else if (isFilled) "😎" else "?", fontSize = 20.sp)
+                if (avatarBitmap != null) {
+                    Image(
+                        bitmap = avatarBitmap,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Text(if (isHost && isFilled) "👑" else if (isFilled) "😎" else "?", fontSize = 20.sp)
+                }
             }
             Spacer(modifier = Modifier.width(12.dp))
             Text(name, color = if (isFilled) Color.White else Color.White.copy(alpha = 0.4f), fontSize = 14.sp)

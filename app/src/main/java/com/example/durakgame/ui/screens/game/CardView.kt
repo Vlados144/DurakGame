@@ -1,83 +1,89 @@
-package com.example.durakgame.ui.components
+package com.example.durakgame.ui.screens.game
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.durakgame.engine.model.Card
+import com.example.durakgame.engine.model.Rank
 
 @Composable
 fun CardView(
-    label: String,
-    isRed: Boolean = false,
+    modifier: Modifier = Modifier,
+    card: Card? = null,
+    skinId: String = "classic",
     faceUp: Boolean = true,
     selected: Boolean = false,
     small: Boolean = false,
-    onClick: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    onClick: (() -> Unit)? = null
 ) {
-    val width = if (small) 45.dp else 55.dp
-    val height = if (small) 65.dp else 75.dp
-    val fontSize = if (small) 13.sp else 16.sp
-
-    val cardColor = if (faceUp) Color(0xFFF5F0E8) else Color(0xFF1A237E)
-    val textColor = if (faceUp) {
-        if (isRed) Color(0xFFC62828) else Color(0xFF212121)
-    } else Color.White
-
-    val borderColor = if (selected) Color(0xFFFFD700) else Color.Transparent
-    val borderWidth = if (selected) 2.dp else 0.5.dp
-    val borderColorDefault = if (faceUp) Color(0xFFCCCCCC) else Color(0xFF0D1642)
+    val context = LocalContext.current
+    // Размеры карт менять строго нельзя
+    val width = if (small) 85.dp else 120.dp
+    val height = if (small) 121.dp else 170.dp
+    
+    val imageName = remember(card, skinId, faceUp) {
+        if (faceUp && card != null) {
+            val rankName = when (card.rank) {
+                Rank.SIX -> "6"
+                Rank.SEVEN -> "7"
+                Rank.EIGHT -> "8"
+                Rank.NINE -> "9"
+                Rank.TEN -> "10"
+                else -> card.rank.name.lowercase()
+            }
+            "card_${skinId}_${card.suit.name.lowercase()}_$rankName"
+        } else {
+            "card_${skinId}_back"
+        }
+    }
+    
+    val imageRes = remember(imageName) {
+        val id = context.resources.getIdentifier(imageName, "drawable", context.packageName)
+        if (id == 0) context.resources.getIdentifier("card_${skinId}_back", "drawable", context.packageName) else id
+    }
 
     Box(
         modifier = modifier
             .size(width, height)
-            .shadow(if (selected) 8.dp else 2.dp, RoundedCornerShape(6.dp))
-            .background(cardColor, RoundedCornerShape(6.dp))
-            .border(
-                if (selected) borderWidth else 0.5.dp,
-                if (selected) borderColor else borderColorDefault,
-                RoundedCornerShape(6.dp)
-            )
+            .shadow(if (selected) 20.dp else 2.dp, RoundedCornerShape(6.dp)) 
+            .clip(RoundedCornerShape(8.dp)) // Сглаживание нельзя менять
+            .background(Color.White)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
         contentAlignment = Alignment.Center
     ) {
-        if (faceUp) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                // Верхний индекс
-                Text(
-                    text = label,
-                    fontSize = fontSize,
-                    fontWeight = FontWeight.Bold,
-                    color = textColor,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1
-                )
-            }
+        if (imageRes != 0) {
+            Image(
+                painter = painterResource(id = imageRes),
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(if (small) 2.dp else 10.dp),
+                contentScale = ContentScale.Fit
+            )
         } else {
-            // Рубашка — узор
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text("♠", fontSize = 10.sp, color = Color.White.copy(alpha = 0.3f))
-                Text("♥", fontSize = 10.sp, color = Color.White.copy(alpha = 0.3f))
-                Text("♦", fontSize = 10.sp, color = Color.White.copy(alpha = 0.3f))
-                Text("♣", fontSize = 10.sp, color = Color.White.copy(alpha = 0.3f))
-            }
+            val label = card?.toString() ?: ""
+            Text(
+                text = label,
+                fontSize = if (small) 16.sp else 32.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (card?.suit?.name == "HEARTS" || card?.suit?.name == "DIAMONDS") Color.Red else Color.Black
+            )
         }
     }
 }

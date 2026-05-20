@@ -4,6 +4,7 @@ data class GameMessage(
     val type: String,
     val playerId: String? = null,
     val playerName: String? = null,
+    val avatarBase64: String? = null,
     val cardId: String? = null,
     val againstCardId: String? = null,
     val gameCode: String? = null,
@@ -17,5 +18,6 @@ data class PlayerInfo(
     val id: String,
     val name: String,
     val cardCount: Int,
-    val isHost: Boolean
+    val isHost: Boolean,
+    val avatarBase64: String? = null
 )

@@ -1,18 +1,20 @@
 package com.example.durakgame.ui.screens.game
 
-import androidx.compose.animation.core.*
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,88 +24,83 @@ import com.example.durakgame.engine.model.Player
 fun OpponentView(
     player: Player,
     isActive: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    skinId: String = "classic"
 ) {
-    // Анимация пульсации для активного игрока
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = if (isActive) 1.15f else 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "scale"
-    )
-    
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = if (isActive) 0.8f else 0.4f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "alpha"
-    )
+    val avatarBitmap = remember(player.avatarBase64) {
+        player.avatarBase64?.let { base64 ->
+            try {
+                val decodedString = Base64.decode(base64, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(decodedString, 0, decodedString.size)?.asImageBitmap()
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
 
     Column(
-        modifier = modifier.padding(8.dp),
+        modifier = modifier.padding(4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            // Внешний пульсирующий круг
-            if (isActive) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .scale(pulseScale)
-                        .background(Color(0xFFFFD700).copy(alpha = pulseAlpha), CircleShape)
+        // Аватарка
+        Box(
+            modifier = Modifier
+                .size(50.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (isActive) Color(0xFFADFF2F) else Color.White.copy(alpha = 0.1f)) 
+                .padding(2.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.Gray),
+            contentAlignment = Alignment.Center
+        ) {
+            if (avatarBitmap != null) {
+                Image(
+                    bitmap = avatarBitmap,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
-            }
-            
-            // Аватарка
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isActive) Color(0xFFFFD700)
-                        else Color.White.copy(alpha = 0.2f)
-                    )
-                    .then(
-                        if (isActive) Modifier.border(2.dp, Color.White, CircleShape)
-                        else Modifier
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("😎", fontSize = 20.sp)
+            } else {
+                Text("👤", fontSize = 24.sp)
             }
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
-        // Имя
         Text(
             player.name,
             color = Color.White,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
         )
 
-        // Карты оппонента (рубашки)
-        if (player.hand.isNotEmpty()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "🂠", 
-                    color = Color.White.copy(alpha = 0.7f), 
-                    fontSize = 14.sp
-                )
-                Spacer(Modifier.width(2.dp))
-                Text(
-                    "${player.hand.size}",
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 11.sp
-                )
+        // Контейнер для счетчика карт
+        Box(
+            modifier = Modifier.height(28.dp), 
+            contentAlignment = Alignment.Center
+        ) {
+            if (player.hand.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp, 14.dp)
+                                .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(2.dp))
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "${player.hand.size}",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
             }
         }
     }
